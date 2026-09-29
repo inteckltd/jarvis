@@ -175,6 +175,21 @@ resources can also be added by hand, edited or deleted there.
 Repositories are added per client (paste a GitHub URL); the GitHub picker arrives in
 step 11.
 
+## Morning dashboard
+
+One card per active client. The RAG status comes from **production only**
+(`packages/shared/src/health.ts`):
+
+- CPU / memory / disk: amber ≥ 75%, red ≥ 90% (disk on App Platform is N/A, never an error)
+- Restarts in the last 24h: any = amber, 3+ = red
+- Latest deployment failed = red; health check down = red
+- Readings older than 20 min (metrics) or 5 min (health checks) are ignored and shown
+  grey as a data gap; missing data never hides a real reading
+
+Development resources sit in a collapsed, muted section and never change the client's
+colour. The side column lists warnings, overdue and today's tasks, and GitHub activity
+(connects in step 11). Mock data only looks "live" right after `pnpm db:seed`.
+
 ## Tasks
 
 **Tasks** has a quick-add bar (title, client or Internal, due date) and views for

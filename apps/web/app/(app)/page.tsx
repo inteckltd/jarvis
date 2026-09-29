@@ -1,160 +1,255 @@
-import { prisma } from "@jarvis/db";
-import { londonDateOnlyBounds } from "@jarvis/shared";
-import { Activity, Gauge, GitBranch, ListChecks, Radar } from "lucide-react";
+import { formatAgo, FRESHNESS, type HealthStatus } from "@jarvis/shared";
+import { CheckCheck, CircleAlert, GitBranch, ListChecks, Radar, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
+import Link from "next/link";
+import { ClientCard } from "@/components/dashboard/client-card";
+import { StatusPill } from "@/components/dashboard/status-pill";
 import { EmptyState } from "@/components/hud/empty-state";
 import { HudPanel } from "@/components/hud/hud-panel";
-import { Stat } from "@/components/hud/stat";
-import { StatusDot } from "@/components/hud/status-dot";
-import { Badge } from "@/components/ui/badge";
+import { SectionLabel } from "@/components/hud/section-label";
+import { TaskList } from "@/components/tasks/task-list";
+import { Button } from "@/components/ui/button";
+import { type Briefing, loadBriefing } from "@/lib/dashboard";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-async function loadSummary() {
-  const { start, end } = londonDateOnlyBounds(new Date());
-  const [clients, production, development, dueToday, overdue, lastSnapshot] = await Promise.all([
-    prisma.client.count({ where: { active: true } }),
-    prisma.resource.count({ where: { active: true, environment: "PRODUCTION" } }),
-    prisma.resource.count({ where: { active: true, environment: "DEVELOPMENT" } }),
-    prisma.task.count({ where: { completed: false, dueDate: { gte: start, lt: end } } }),
-    prisma.task.count({ where: { completed: false, dueDate: { lt: start } } }),
-    prisma.metricSnapshot.findFirst({
-      orderBy: { capturedAt: "desc" },
-      select: { capturedAt: true },
-    }),
-  ]);
-  return {
-    clients,
-    production,
-    development,
-    dueToday,
-    overdue,
-    lastSnapshot: lastSnapshot?.capturedAt ?? null,
-  };
+const WARNING_TEXT: Record<HealthStatus, string> = {
+  critical: "text-status-critical",
+  warning: "text-status-warning",
+  healthy: "text-status-healthy",
+  nodata: "text-muted-foreground",
+};
+
+function WarningsPanel({ briefing }: { briefing: Briefing }) {
+  const items = briefing.clients.flatMap((c) =>
+    c.warnings.map((w) => ({ ...w, clientName: c.name, clientSlug: c.slug })),
+  );
+  const alerts = items.filter((w) => w.status === "critical" || w.status === "warning");
+  const gaps = items.filter((w) => w.status === "nodata");
+  const total = alerts.length + briefing.accountErrors.length;
+
+  return (
+    <HudPanel
+      label="Attention"
+      title={
+        <span className="flex items-center gap-2">
+          Warnings
+          <span
+            className={cn(
+              "font-mono text-sm",
+              total > 0 ? "text-status-warning" : "text-muted-foreground",
+            )}
+          >
+            {total}
+          </span>
+        </span>
+      }
+      corners={false}
+    >
+      {total === 0 && gaps.length === 0 ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CheckCheck className="size-4 text-status-healthy" />
+          Nothing needs attention in production.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {alerts.length > 0 && (
+            <ul className="space-y-2">
+              {alerts.map((w) => (
+                <li key={`${w.resourceId}-${w.message}`} className="flex items-start gap-2 text-sm">
+                  {w.status === "critical" ? (
+                    <CircleAlert className="mt-0.5 size-4 shrink-0 text-status-critical" />
+                  ) : (
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0 text-status-warning" />
+                  )}
+                  <span className="min-w-0">
+                    <Link
+                      href={`/clients/${w.clientSlug}/resources/${w.resourceId}`}
+                      className="font-medium hover:text-primary"
+                    >
+                      {w.resourceName}
+                    </Link>
+                    <span className="text-muted-foreground"> · {w.clientName}</span>
+                    <span className={cn("block text-xs", WARNING_TEXT[w.status])}>{w.message}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {briefing.accountErrors.length > 0 && (
+            <ul className="space-y-2">
+              {briefing.accountErrors.map((a) => (
+                <li key={a.id} className="text-sm">
+                  <Link
+                    href={`/settings/accounts/${a.id}`}
+                    className="font-medium hover:text-primary"
+                  >
+                    {a.label}
+                  </Link>
+                  <span className="block text-xs text-muted-foreground">{a.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {gaps.length > 0 && (
+            <details className="group text-xs text-muted-foreground">
+              <summary className="cursor-pointer list-none select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+                {gaps.length} data gap{gaps.length === 1 ? "" : "s"} (no recent metrics or checks)
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {gaps.map((w) => (
+                  <li key={`${w.resourceId}-${w.message}`}>
+                    <span className="text-foreground/80">{w.resourceName}</span> · {w.message}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </HudPanel>
+  );
 }
 
-const UPCOMING = [
-  {
-    icon: Gauge,
-    title: "Client health",
-    body: "Production RAG status, gauges, uptime and restarts per client.",
-  },
-  {
-    icon: Activity,
-    title: "Deployments",
-    body: "Latest deploys and builds, with development shown separately.",
-  },
-  {
-    icon: GitBranch,
-    title: "GitHub activity",
-    body: "Commits, PRs and what is on staging awaiting production.",
-  },
-];
+function TasksPanel({ briefing }: { briefing: Briefing }) {
+  const { overdue, today } = briefing.tasks;
+  return (
+    <HudPanel
+      label="Today"
+      title="Tasks"
+      corners={false}
+      actions={
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/tasks">
+            <ListChecks />
+            All tasks
+          </Link>
+        </Button>
+      }
+    >
+      {overdue.length === 0 && today.length === 0 ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CheckCheck className="size-4 text-status-healthy" />
+          Nothing due today.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {overdue.length > 0 && (
+            <div className="space-y-2">
+              <SectionLabel className="text-status-critical">
+                Overdue · {overdue.length}
+              </SectionLabel>
+              <TaskList tasks={overdue} now={briefing.now} />
+            </div>
+          )}
+          {today.length > 0 && (
+            <div className="space-y-2">
+              <SectionLabel>Due today · {today.length}</SectionLabel>
+              <TaskList tasks={today} now={briefing.now} />
+            </div>
+          )}
+        </div>
+      )}
+    </HudPanel>
+  );
+}
+
+function GithubPanel() {
+  return (
+    <HudPanel label="GitHub" title="Activity" corners={false} tone="muted">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm text-muted-foreground">Awaiting production</span>
+          <span className="font-mono text-2xl text-status-nodata">—</span>
+        </div>
+        <p className="flex items-start gap-2 text-xs text-muted-foreground">
+          <GitBranch className="mt-0.5 size-3.5 shrink-0" />
+          Commits, PRs and what&apos;s on staging but not yet in production appear once the GitHub
+          integration is connected (step 11).
+        </p>
+      </div>
+    </HudPanel>
+  );
+}
 
 export default async function DashboardPage() {
-  let summary: Awaited<ReturnType<typeof loadSummary>> | null = null;
+  let briefing: Briefing | null = null;
   try {
-    summary = await loadSummary();
+    briefing = await loadBriefing();
   } catch (error) {
-    console.error("Dashboard summary failed", error);
+    console.error("Loading briefing failed", error);
   }
 
-  if (!summary) {
+  if (!briefing) {
     return (
       <HudPanel label="System link">
         <EmptyState
           icon={<Radar />}
           title="Database unreachable"
-          description="Check DATABASE_URL in .env and that migrations have been applied (pnpm db:migrate)."
+          description="Check DATABASE_URL in .env and that migrations have been applied (pnpm db:deploy)."
         />
       </HudPanel>
     );
   }
 
-  const hasData = summary.clients > 0;
+  const { now, clients, newestMetricAt } = briefing;
+  const staleFor =
+    newestMetricAt && now.getTime() - newestMetricAt.getTime() > FRESHNESS.metricsMs
+      ? formatAgo(newestMetricAt, now)
+      : null;
+  const counts = clients.reduce<Record<HealthStatus, number>>(
+    (acc, c) => ({ ...acc, [c.status]: acc[c.status] + 1 }),
+    { healthy: 0, warning: 0, critical: 0, nodata: 0 },
+  );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <HudPanel
-        label="System link"
-        title="Jarvis database"
-        className="lg:col-span-2"
-        actions={
-          <Badge variant={hasData ? "healthy" : "nodata"}>
-            <StatusDot
-              status={hasData ? "healthy" : "nodata"}
-              className="size-1.5 [&>span]:size-1.5"
-            />
-            {hasData ? "Online" : "Empty"}
-          </Badge>
-        }
-      >
-        <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
-          <Stat label="Clients" value={summary.clients} />
-          <Stat label="Production" value={summary.production} hint="resources" />
-          <Stat label="Development" value={summary.development} hint="resources" />
-          <Stat
-            label="Last metric"
-            value={
-              summary.lastSnapshot
-                ? Math.round((Date.now() - summary.lastSnapshot.getTime()) / 60_000)
-                : null
-            }
-            hint="minutes ago"
-          />
-        </div>
-        {!hasData && (
-          <p className="mt-4 text-sm text-muted-foreground">
-            No clients yet. Run <code className="font-mono text-primary">pnpm db:seed</code> to load
-            the IDS pilot data.
-          </p>
-        )}
-      </HudPanel>
-
-      <HudPanel label="Today" title="Tasks">
-        <div className="grid grid-cols-2 gap-6">
-          <Stat label="Due today" value={summary.dueToday} />
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] tracking-wider text-muted-foreground uppercase">
-              Overdue
-            </span>
-            <span
-              className={
-                summary.overdue > 0
-                  ? "font-mono text-2xl font-medium text-status-warning tabular-nums"
-                  : "font-mono text-2xl font-medium tabular-nums"
-              }
-            >
-              {summary.overdue}
-            </span>
-          </div>
-        </div>
-        <p className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-          <ListChecks className="size-3.5" /> Task views arrive in step 5.
+    <div className="flex flex-col gap-6">
+      {staleFor && (
+        <p className="flex items-start gap-2 rounded-md border border-status-nodata/40 bg-status-nodata/10 px-4 py-2.5 text-sm text-muted-foreground">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-status-warning" />
+          <span>
+            The newest metrics are from {staleFor}, so readings are greyed out. Live collection
+            starts with the integrations (step 8 onwards); until then run{" "}
+            <code className="font-mono text-primary">pnpm db:seed</code> to refresh the mock data.
+          </span>
         </p>
-      </HudPanel>
+      )}
 
-      <HudPanel
-        label="Coming online"
-        title="Morning briefing"
-        className="lg:col-span-3"
-        corners={false}
-      >
-        <ul className="grid gap-4 md:grid-cols-3">
-          {UPCOMING.map(({ icon: Icon, title, body }) => (
-            <li
-              key={title}
-              className="flex gap-3 rounded-md border border-border/60 bg-background/40 p-4"
-            >
-              <Icon className="mt-0.5 size-4 shrink-0 text-primary" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium">{title}</p>
-                <p className="text-sm text-muted-foreground">{body}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </HudPanel>
+      {clients.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <SectionLabel className="mr-1">Clients</SectionLabel>
+          {(["critical", "warning", "healthy", "nodata"] as const).map((s) =>
+            counts[s] > 0 ? <StatusPill key={s} status={s} label={`${counts[s]}`} /> : null,
+          )}
+        </div>
+      )}
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="flex min-w-0 flex-col gap-6">
+          {clients.length === 0 ? (
+            <HudPanel label="Clients">
+              <EmptyState
+                icon={<Radar />}
+                title="No active clients"
+                description="Add a client, or run pnpm db:seed to load the IDS pilot data."
+                action={
+                  <Button asChild size="sm">
+                    <Link href="/clients/new">Add client</Link>
+                  </Button>
+                }
+              />
+            </HudPanel>
+          ) : (
+            clients.map((c) => <ClientCard key={c.id} client={c} now={now} />)
+          )}
+        </div>
+        <aside className="flex flex-col gap-6">
+          <WarningsPanel briefing={briefing} />
+          <TasksPanel briefing={briefing} />
+          <GithubPanel />
+        </aside>
+      </div>
     </div>
   );
 }
