@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Jarvis is dark-only: a single palette on :root. Near-black blue background,
+ * cyan / electric-blue accents, soft glow. Status colours are separate tokens so
+ * "N/A" (neutral) is never confused with "no data" (grey) or an error.
+ */
+:root {
+  --radius: 0.375rem;
+
+  --background: oklch(0.13 0.014 252);
+  --foreground: oklch(0.93 0.018 225);
+
+  --card: oklch(0.165 0.02 250 / 0.82);
+  --card-foreground: oklch(0.93 0.018 225);
+  --popover: oklch(0.17 0.022 250);
+  --popover-foreground: oklch(0.93 0.018 225);
+
+  --primary: oklch(0.8 0.145 211);
+  --primary-foreground: oklch(0.15 0.02 250);
+  --secondary: oklch(0.22 0.028 250);
+  --secondary-foreground: oklch(0.9 0.02 225);
+  --muted: oklch(0.2 0.022 250);
+  --muted-foreground: oklch(0.66 0.03 240);
+  --accent: oklch(0.62 0.2 260);
+  --accent-foreground: oklch(0.97 0.01 240);
+  --destructive: oklch(0.64 0.23 25);
+
+  --border: oklch(0.8 0.145 211 / 0.16);
+  --input: oklch(0.8 0.145 211 / 0.22);
+  --ring: oklch(0.8 0.145 211 / 0.65);
+  --glow: oklch(0.8 0.145 211 / 0.35);
+  --grid-line: oklch(0.8 0.145 211 / 0.045);
+
+  --status-healthy: oklch(0.74 0.19 150);
+  --status-warning: oklch(0.79 0.17 72);
+  --status-critical: oklch(0.65 0.23 25);
+  --status-nodata: oklch(0.55 0.03 255);
+  --status-na: oklch(0.68 0.02 250);
+
+  --chart-1: oklch(0.8 0.145 211);
+  --chart-2: oklch(0.62 0.2 260);
+  --chart-3: oklch(0.74 0.19 150);
+  --chart-4: oklch(0.79 0.17 72);
+  --chart-5: oklch(0.7 0.16 300);
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+  --font-display: var(--font-orbitron), var(--font-geist-sans), sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-glow: var(--glow);
+
+  --color-status-healthy: var(--status-healthy);
+  --color-status-warning: var(--status-warning);
+  --color-status-critical: var(--status-critical);
+  --color-status-nodata: var(--status-nodata);
+  --color-status-na: var(--status-na);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+
+  --animate-hud-scan: hud-scan 7s linear infinite;
+  --animate-hud-fade-in: hud-fade-in 400ms ease-out both;
+}
+
+@keyframes hud-scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes hud-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Faint line grid with a soft cyan glow from the top. */
+@utility hud-grid {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.8 0.145 211 / 0.09), transparent 70%),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    32px 32px,
+    32px 32px;
+  background-attachment: fixed;
+}
+
+/* Thin glowing border. */
+@utility hud-border {
+  border: 1px solid var(--border);
+  box-shadow:
+    inset 0 0 0 1px oklch(0.8 0.145 211 / 0.03),
+    0 0 18px -8px var(--glow);
+}
+
+@utility hud-glow-text {
+  text-shadow: 0 0 14px var(--glow);
+}
+
+/* Corner brackets (top-left and bottom-right). */
+@utility hud-corners {
+  position: relative;
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    pointer-events: none;
+    border-color: var(--primary);
+    opacity: 0.7;
+  }
+  &::before {
+    top: -1px;
+    left: -1px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+    border-top-left-radius: var(--radius);
+  }
+  &::after {
+    right: -1px;
+    bottom: -1px;
+    border-right: 1px solid;
+    border-bottom: 1px solid;
+    border-bottom-right-radius: var(--radius);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+  ::selection {
+    background: oklch(0.8 0.145 211 / 0.3);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -1,0 +1,318 @@
+// Jarvis's own database (a dedicated Supabase Postgres project).
+// Tables live in the "jarvis" Postgres schema (set via ?schema=jarvis in the
+// connection URLs) so they are not exposed through Supabase's public Data API.
+// All timestamps are stored in UTC.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Provider {
+  DIGITALOCEAN
+  AWS
+  SUPABASE
+  VERCEL
+  EXPO
+}
+
+enum AuthType {
+  ENV_TOKEN
+  ENCRYPTED_TOKEN
+  AWS_ASSUME_ROLE
+  AWS_ACCESS_KEY
+}
+
+enum Environment {
+  PRODUCTION
+  DEVELOPMENT
+  NONE
+}
+
+enum ResourceType {
+  DO_APP
+  DO_DROPLET
+  SUPABASE_PROJECT
+  SUPABASE_FUNCTIONS
+  VERCEL_PROJECT
+  EXPO_APP
+  AWS_EC2
+}
+
+enum DeploymentStatus {
+  BUILDING
+  SUCCESS
+  FAILED
+  CANCELED
+}
+
+enum MobilePlatform {
+  IOS
+  ANDROID
+}
+
+enum MobileBuildStatus {
+  QUEUED
+  IN_PROGRESS
+  FINISHED
+  ERRORED
+  CANCELED
+}
+
+enum ReportStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  logoUrl      String?
+  contactName  String?
+  contactEmail String?
+  notes        String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  providerAccounts ProviderAccount[]
+  resources        Resource[]
+  repositories     Repository[]
+  tasks            Task[]
+  reports          Report[]
+}
+
+model ProviderAccount {
+  id                   String    @id @default(cuid())
+  /// null = Inteck-owned account
+  clientId             String?
+  client               Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  label                String
+  provider             Provider
+  authType             AuthType
+  /// AES-256-GCM ciphertext; decrypted only in apps/api
+  encryptedCredentials String?
+  /// For ENV_TOKEN, the name of the env var holding the token (e.g. "DO_API_TOKEN")
+  envVarName           String?
+  awsRoleArn           String?
+  awsExternalId        String?
+  lastVerifiedAt       DateTime?
+  lastError            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  resources Resource[]
+
+  @@index([clientId])
+  @@index([provider])
+}
+
+model Resource {
+  id                String          @id @default(cuid())
+  clientId          String
+  client            Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  providerAccountId String
+  providerAccount   ProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Restrict)
+  name              String
+  environment       Environment
+  type              ResourceType
+  /// DO app ID / droplet ID / Supabase project ref / Vercel project ID / Expo project ID
+  externalId        String
+  region            String?
+  liveUrl           String?
+  healthCheckUrl    String?
+  repositoryId      String?
+  repository        Repository?     @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  /// Provider-specific settings (e.g. DO componentName, bundleId); validated with zod per type
+  config            Json            @default("{}")
+  /// AES-256-GCM ciphertext (e.g. Supabase service role key); decrypted only in apps/api
+  encryptedSecrets  String?
+  lastError         String?
+  active            Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  metricSnapshots MetricSnapshot[]
+  metricRollups   MetricRollupHourly[]
+  healthChecks    HealthCheck[]
+  deployments     Deployment[]
+  mobileBuilds    MobileBuild[]
+  storeVersions   StoreVersion[]
+  functionStats   FunctionStats[]
+
+  // The same externalId can legitimately appear more than once: a Vercel project
+  // tracked as PRODUCTION and DEVELOPMENT, or a Supabase project and its functions.
+  @@unique([providerAccountId, type, externalId, environment])
+  @@index([clientId, environment])
+}
+
+model MetricSnapshot {
+  id            String   @id @default(cuid())
+  resourceId    String
+  resource      Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  cpuPercent    Float?
+  memoryPercent Float?
+  /// null = not applicable (e.g. DO App Platform)
+  diskPercent   Float?
+  /// Restarts that occurred within this sample's interval (a delta, not a cumulative counter)
+  restartCount  Int?
+  dbConnections Int?
+  dbSizeBytes   BigInt?
+  capturedAt    DateTime
+
+  @@index([resourceId, capturedAt])
+}
+
+model MetricRollupHourly {
+  id             String   @id @default(cuid())
+  resourceId     String
+  resource       Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  /// Start of the UTC hour
+  hour           DateTime
+  avgCpu         Float?
+  maxCpu         Float?
+  avgMemory      Float?
+  maxMemory      Float?
+  avgDisk        Float?
+  maxDisk        Float?
+  restarts       Int      @default(0)
+  maxDbSizeBytes BigInt?
+  sampleCount    Int      @default(0)
+
+  @@unique([resourceId, hour])
+}
+
+model HealthCheck {
+  id         String   @id @default(cuid())
+  resourceId String
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  isUp       Boolean
+  statusCode Int?
+  responseMs Int?
+  checkedAt  DateTime
+
+  @@index([resourceId, checkedAt])
+}
+
+model Deployment {
+  id            String           @id @default(cuid())
+  resourceId    String
+  resource      Resource         @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  externalId    String
+  status        DeploymentStatus
+  cause         String?
+  commitSha     String?
+  commitMessage String?
+  branch        String?
+  url           String?
+  startedAt     DateTime
+  finishedAt    DateTime?
+
+  @@unique([resourceId, externalId])
+  @@index([resourceId, startedAt])
+}
+
+model MobileBuild {
+  id               String            @id @default(cuid())
+  resourceId       String
+  resource         Resource          @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  externalId       String
+  platform         MobilePlatform
+  /// EAS build profile, e.g. "production", "preview"
+  profile          String
+  status           MobileBuildStatus
+  appVersion       String
+  buildNumber      String
+  commitSha        String?
+  submittedToStore Boolean           @default(false)
+  /// Build creation time as reported by EAS
+  createdAt        DateTime
+  completedAt      DateTime?
+
+  @@unique([resourceId, externalId])
+  @@index([resourceId, createdAt])
+}
+
+model StoreVersion {
+  id         String         @id @default(cuid())
+  resourceId String
+  resource   Resource       @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  platform   MobilePlatform
+  version    String
+  releasedAt DateTime?
+  checkedAt  DateTime
+
+  @@unique([resourceId, platform, version])
+}
+
+model FunctionStats {
+  id          String   @id @default(cuid())
+  resourceId  String
+  resource    Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  periodStart DateTime
+  periodEnd   DateTime
+  invocations Int
+  errors      Int
+
+  @@unique([resourceId, periodStart, periodEnd])
+}
+
+model Repository {
+  id                String   @id @default(cuid())
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  owner             String
+  name              String
+  productionBranch  String   @default("main")
+  developmentBranch String?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  resources Resource[]
+
+  @@unique([owner, name])
+  @@index([clientId])
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  /// null = internal task
+  clientId    String?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  title       String
+  dueDate     DateTime
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([dueDate, completed])
+  @@index([clientId])
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  clientId       String
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// "YYYY-MM"
+  month          String
+  /// Aggregated snapshot; frozen on publish
+  data           Json
+  summary        String       @default("")
+  hiddenSections String[]     @default([])
+  status         ReportStatus @default(DRAFT)
+  /// Random, unguessable token generated in application code
+  publicToken    String       @unique
+  pdfUrl         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  publishedAt    DateTime?
+
+  @@unique([clientId, month])
+}
