@@ -12,6 +12,17 @@ const envSchema = z.object({
     .trim()
     .optional()
     .transform((v) => (v ? v : undefined)),
+  /** Session-mode connection (Supabase port 5432) used by pg-boss; jobs are off without it. */
+  DIRECT_URL: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  /** Scheduled collection, rollups and retention. Set to "false" to run the API without them. */
+  JOBS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
   /** Set by hosting platforms such as DO App Platform; overrides the port in API_URL. */
   PORT: z.coerce.number().int().positive().optional(),
   HOST: z.string().default("0.0.0.0"),

@@ -166,7 +166,7 @@ model MetricSnapshot {
   dbSizeBytes   BigInt?
   capturedAt    DateTime
 
-  @@index([resourceId, capturedAt])
+  @@unique([resourceId, capturedAt])
 }
 
 model MetricRollupHourly {

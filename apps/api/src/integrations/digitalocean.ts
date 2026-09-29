@@ -3,13 +3,13 @@ import { z } from "zod";
 import { type FetchFn, requestJson } from "./http";
 import { type DiscoveredItem, type DiscoveryProvider } from "./types";
 
-const BASE = "https://api.digitalocean.com";
+export const DO_API_BASE = "https://api.digitalocean.com";
 const PER_PAGE = 100;
 const MAX_PAGES = 20;
 
 const gitSourceSchema = z.object({ repo: z.string().optional(), branch: z.string().optional() });
 
-const componentSchema = z.object({
+export const doComponentSchema = z.object({
   name: z.string(),
   github: gitSourceSchema.optional(),
   gitlab: gitSourceSchema.optional(),
@@ -24,9 +24,9 @@ const appSchema = z.object({
   spec: z.object({
     name: z.string(),
     region: z.string().optional(),
-    services: z.array(componentSchema).optional(),
-    workers: z.array(componentSchema).optional(),
-    static_sites: z.array(componentSchema).optional(),
+    services: z.array(doComponentSchema).optional(),
+    workers: z.array(doComponentSchema).optional(),
+    static_sites: z.array(doComponentSchema).optional(),
   }),
   live_url: z.string().optional(),
   default_ingress: z.string().optional(),
@@ -72,7 +72,7 @@ export function createDigitalOceanDiscovery(fetch: FetchFn): DiscoveryProvider {
     requestJson({
       fetch,
       provider: "DigitalOcean",
-      url: `${BASE}${path}`,
+      url: `${DO_API_BASE}${path}`,
       token,
       schema: listSchema,
     });

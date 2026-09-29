@@ -1,4 +1,5 @@
 import { prisma } from "@jarvis/db";
+import { isCollectableType } from "@jarvis/shared";
 import { TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -6,6 +7,7 @@ import { ConfirmDeleteButton } from "@/components/forms/confirm-delete-button";
 import { Breadcrumbs } from "@/components/hud/breadcrumbs";
 import { HudPanel } from "@/components/hud/hud-panel";
 import { ResourceForm } from "@/components/resources/resource-form";
+import { SyncNowButton } from "@/components/resources/sync-now-button";
 import { deleteResourceAction, updateResourceAction } from "@/lib/actions/resources";
 import { ENVIRONMENT_LABEL } from "@/lib/labels";
 import { loadFormAccounts } from "@/lib/resource-form-data";
@@ -88,10 +90,13 @@ export default async function EditResourcePage(props: Params) {
       />
 
       {resource.lastError && (
-        <p className="flex max-w-3xl items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
+        <div className="flex max-w-3xl items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
           <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          {resource.lastError}
-        </p>
+          <p className="flex-1">{resource.lastError}</p>
+          {isCollectableType(resource.type) && (
+            <SyncNowButton resourceId={resource.id} variant="outline" />
+          )}
+        </div>
       )}
 
       <HudPanel label="Inventory" title={`Edit ${resource.name}`} className="max-w-3xl">

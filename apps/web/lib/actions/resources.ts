@@ -6,9 +6,11 @@ import {
   RESOURCE_CONFIG_FIELDS,
   RESOURCE_TYPE_PROVIDER,
   resourceInputSchema,
+  resourceSyncResultSchema,
 } from "@jarvis/shared";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { apiFetch } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { ENVIRONMENT_LABEL } from "@/lib/labels";
 
@@ -189,6 +191,28 @@ export async function updateResourceAction(
   formData: FormData,
 ): Promise<ResourceFormState> {
   return saveResource(resourceId, "redirect", formData);
+}
+
+export type SyncResourceResult = { ok: boolean; message: string };
+
+/** Asks apps/api to collect this resource's metrics and deployments right now. */
+export async function syncResourceAction(resourceId: string): Promise<SyncResourceResult> {
+  await requireUser();
+  const res = await apiFetch(
+    `/v1/resources/${encodeURIComponent(resourceId)}/sync`,
+    resourceSyncResultSchema,
+    { method: "POST", timeoutMs: 60_000 },
+  );
+  revalidatePath("/clients", "layout");
+  revalidatePath("/");
+  if (!res.ok) return { ok: false, message: res.error };
+  const { samples, deployments, error } = res.data;
+  if (error) return { ok: false, message: error };
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  return {
+    ok: true,
+    message: `Synced · ${plural(samples, "new sample")}, ${plural(deployments, "deployment")} checked`,
+  };
 }
 
 export async function deleteResourceAction(

@@ -110,6 +110,9 @@ const TASKS: readonly TaskSpec[] = [
   { title: "Renew Inteck professional indemnity insurance", client: false, dueInDays: 12 },
 ];
 
+/** Used by clear-mock to find seeded tasks. */
+export const SEEDED_TASK_TITLES: readonly string[] = TASKS.map((t) => t.title);
+
 export function tasks(ctx: SeedContext, clientId: string): Prisma.TaskCreateInput[] {
   return TASKS.map((t) => {
     const dueDate = londonDateOnly(ctx.now, t.dueInDays);

@@ -105,6 +105,14 @@ What gets seeded for **Industrial Door Systems** (`slug: ids`):
 
 All external IDs and URLs are fake (`mock-…`).
 
+To go live, remove the mock data but keep the real configuration (clients, provider
+accounts, repositories and anything you created):
+
+```bash
+pnpm db:clear-mock          # dry run: lists what would be deleted
+pnpm db:clear-mock --yes    # delete seeded resources (and their metrics etc.) and seeded tasks
+```
+
 ## Scripts
 
 | Command                 | Description                                           |
@@ -146,7 +154,8 @@ See `.env.example` for the full annotated list.
 | `EXPO_TOKEN`                     | api          | step 4 (discovery), step 12     |
 | `AI_ENABLED`, `AI_API_KEY`       | api          | step 15                         |
 
-The API also honours `PORT` (set by hosting platforms), `HOST` and `LOG_LEVEL`.
+The API also honours `PORT` (set by hosting platforms), `HOST`, `LOG_LEVEL` and
+`JOBS_ENABLED` (default `true`; the scheduler also needs `DIRECT_URL`).
 
 Token how-tos: [DigitalOcean](docs/setup-digitalocean.md), [Supabase](docs/setup-supabase.md),
 [Vercel](docs/setup-vercel.md), [Expo](docs/setup-expo.md).
@@ -189,6 +198,40 @@ One card per active client. The RAG status comes from **production only**
 Development resources sit in a collapsed, muted section and never change the client's
 colour. The side column lists warnings, overdue and today's tasks, and GitHub activity
 (connects in step 11). Mock data only looks "live" right after `pnpm db:seed`.
+
+## Client detail
+
+`/clients/[slug]` has tabs for **Production**, **Development** (muted, never affects
+status), **Mobile** (App Store version, Android submissions, EAS builds) and
+**Activity** (deploys, builds and completed tasks by day). Charts cover 24h / 7d / 30d:
+24h reads raw samples in 10-minute buckets; 7d and 30d read the hourly rollups. Buckets
+are computed in Postgres (`date_bin`), and gaps are left as gaps rather than joined up.
+
+## Live collection
+
+`apps/api` runs a pg-boss scheduler (tables in the `pgboss` schema, connected through
+`DIRECT_URL` because it needs a session connection). Jobs, all in UTC:
+
+| Job                 | When           | What                                                        |
+| ------------------- | -------------- | ----------------------------------------------------------- |
+| `collect-resources` | every 5 min    | metrics + deployments for every active collectable resource |
+| `rollup-hourly`     | hourly at :05  | recomputes the last 2 hours of `MetricRollupHourly`         |
+| `purge-retention`   | daily at 03:30 | raw metrics + health checks > 90 days, rollups > 13 months  |
+
+A collection also runs as soon as the API starts. The first sync of a resource
+backfills 24h of metrics and 30 days of deployments. Each resource is collected
+independently: a failure is saved to that resource's `lastError` (shown as a warning
+on the dashboard and client page) and cleared on the next success, without affecting
+others. **Sync now** on a resource triggers a collection straight away
+(`POST /v1/resources/:id/sync`).
+
+Live so far: **DigitalOcean App Platform** (`DO_APP`), which uses the Monitoring API for
+CPU, memory and restarts of the component in `config.componentName`. With several
+instances, the busiest one is stored. Restart counters are converted to restarts per
+sample. Disk is N/A. Deployments come from `/v2/apps/{id}/deployments`: ACTIVE and
+SUPERSEDED map to success, ERROR to failed, CANCELED to canceled, anything else to
+building. The commit message is filled in once GitHub is connected; until then the
+deploy "cause" is shown.
 
 ## Tasks
 

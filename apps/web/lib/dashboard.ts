@@ -136,9 +136,12 @@ function countMap(
 
 const RECENT_DEPLOYS = 4;
 
-export async function loadBriefing(now: Date = new Date()): Promise<Briefing> {
+export async function loadBriefing(
+  now: Date = new Date(),
+  options: { clientId?: string } = {},
+): Promise<Briefing> {
   const clients = await prisma.client.findMany({
-    where: { active: true },
+    where: options.clientId ? { id: options.clientId } : { active: true },
     orderBy: { name: "asc" },
     select: {
       id: true,
@@ -338,7 +341,7 @@ export async function loadBriefing(now: Date = new Date()): Promise<Briefing> {
     resourceName,
     environment,
     status: d.status,
-    commitMessage: d.commitMessage,
+    commitMessage: d.commitMessage ?? d.cause,
     commitSha: d.commitSha,
     branch: d.branch,
     url: d.url,
