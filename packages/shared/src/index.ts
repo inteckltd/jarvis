@@ -4,3 +4,6 @@ export * from "./schemas";
 export * from "./rollup";
 export * from "./status";
 export * from "./client";
+export * from "./providers";
+export * from "./inventory";
+export * from "./tasks";

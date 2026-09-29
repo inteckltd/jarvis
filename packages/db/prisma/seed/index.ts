@@ -334,7 +334,9 @@ async function main(): Promise<void> {
   await insertChunked("store versions", storeVersions(ctx, r.mobile), (data) =>
     prisma.storeVersion.createMany({ data }),
   );
-  await insertChunked("tasks", tasks(ctx, client.id), (data) => prisma.task.createMany({ data }));
+  const taskRows = tasks(ctx, client.id);
+  for (const data of taskRows) await prisma.task.create({ data });
+  console.log(`  ${"tasks".padEnd(20)} ${taskRows.length}`);
 
   console.log("Done.");
 }

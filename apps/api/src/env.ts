@@ -6,6 +6,12 @@ const envSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   ALLOWED_EMAIL: z.email().transform((v) => v.trim().toLowerCase()),
   API_URL: z.url().default("http://localhost:4000"),
+  /** 32 bytes, base64. Optional until an encrypted credential is stored; validated at startup. */
+  ENCRYPTION_KEY: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined)),
   /** Set by hosting platforms such as DO App Platform; overrides the port in API_URL. */
   PORT: z.coerce.number().int().positive().optional(),
   HOST: z.string().default("0.0.0.0"),

@@ -287,13 +287,36 @@ model Task {
   clientId    String?
   client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   title       String
+  description String?
+  /// Date-only: 12:00 UTC on the London calendar day
   dueDate     DateTime
   completed   Boolean   @default(false)
   completedAt DateTime?
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  comments TaskComment[]
 
   @@index([dueDate, completed])
   @@index([clientId])
+}
+
+enum CommentAuthorType {
+  INTECK
+  CONTACT
+}
+
+model TaskComment {
+  id         String            @id @default(cuid())
+  taskId     String
+  task       Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorType CommentAuthorType @default(INTECK)
+  /// Name at the time of writing, so the thread reads correctly if a contact is renamed or removed
+  authorName String
+  body       String
+  createdAt  DateTime          @default(now())
+
+  @@index([taskId, createdAt])
 }
 
 model Report {

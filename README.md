@@ -101,7 +101,7 @@ What gets seeded for **Industrial Door Systems** (`slug: ids`):
   2 Supabase databases, 2 edge-function resources, 2 Vercel environments, 1 Expo app
 - ~18k metric snapshots (15-min for 30 days, 5-min for the last 24h) and their hourly rollups
 - ~52k health checks (5-min, 1-min for the last 2h) including a 15-min production outage 12 days ago
-- ~120 deployments, 8 EAS builds, iOS store versions, daily edge-function stats, 16 tasks
+- ~120 deployments, 8 EAS builds, iOS store versions, daily edge-function stats, 16 tasks (some with descriptions and comment threads)
 
 All external IDs and URLs are fake (`mock-…`).
 
@@ -130,23 +130,61 @@ database (e.g. a local Postgres).
 
 See `.env.example` for the full annotated list.
 
-| Variable                         | Used by      | Needed from |
-| -------------------------------- | ------------ | ----------- |
-| `DATABASE_URL`, `DIRECT_URL`     | db, web, api | now         |
-| `NEXT_PUBLIC_SUPABASE_URL`       | web, api     | now         |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | web, api     | now         |
-| `SUPABASE_SERVICE_ROLE_KEY`      | api scripts  | now         |
-| `ALLOWED_EMAIL`                  | web, api     | now         |
-| `API_URL`                        | web, api     | now         |
-| `ENCRYPTION_KEY`                 | api          | step 4      |
-| `DO_API_TOKEN`                   | api          | step 8      |
-| `SUPABASE_ACCESS_TOKEN`          | api          | step 9      |
-| `VERCEL_TOKEN`, `VERCEL_TEAM_ID` | api          | step 10     |
-| `GITHUB_TOKEN`                   | api          | step 11     |
-| `EXPO_TOKEN`                     | api          | step 12     |
-| `AI_ENABLED`, `AI_API_KEY`       | api          | step 15     |
+| Variable                         | Used by      | Needed from                     |
+| -------------------------------- | ------------ | ------------------------------- |
+| `DATABASE_URL`, `DIRECT_URL`     | db, web, api | now                             |
+| `NEXT_PUBLIC_SUPABASE_URL`       | web, api     | now                             |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | web, api     | now                             |
+| `SUPABASE_SERVICE_ROLE_KEY`      | api scripts  | now                             |
+| `ALLOWED_EMAIL`                  | web, api     | now                             |
+| `API_URL`                        | web, api     | now                             |
+| `ENCRYPTION_KEY`                 | api          | step 4 (only for stored tokens) |
+| `DO_API_TOKEN`                   | api          | step 4 (discovery), step 8      |
+| `SUPABASE_ACCESS_TOKEN`          | api          | step 4 (discovery), step 9      |
+| `VERCEL_TOKEN`, `VERCEL_TEAM_ID` | api          | step 4 (discovery), step 10     |
+| `GITHUB_TOKEN`                   | api          | step 11                         |
+| `EXPO_TOKEN`                     | api          | step 4 (discovery), step 12     |
+| `AI_ENABLED`, `AI_API_KEY`       | api          | step 15                         |
 
 The API also honours `PORT` (set by hosting platforms), `HOST` and `LOG_LEVEL`.
+
+Token how-tos: [DigitalOcean](docs/setup-digitalocean.md), [Supabase](docs/setup-supabase.md),
+[Vercel](docs/setup-vercel.md), [Expo](docs/setup-expo.md).
+
+## Provider accounts and resources
+
+Settings → Provider accounts. Each account is either:
+
+- **Environment variable** (Inteck-owned): the account stores only the variable
+  _name_. It must be the provider's default (`DO_API_TOKEN`, `SUPABASE_ACCESS_TOKEN`,
+  `VERCEL_TOKEN`, `EXPO_TOKEN`) or that name plus a suffix, e.g. `DO_API_TOKEN_ACME`,
+  so an account can never read unrelated secrets. Vercel pairs `VERCEL_TOKEN_X` with
+  `VERCEL_TEAM_ID_X`. Restart the API after editing `.env`.
+- **Stored, encrypted** (client-owned): the token is sent to the API once and saved
+  AES-256-GCM encrypted with `ENCRYPTION_KEY`. It is never shown again; the UI only
+  sees the last four characters.
+
+Settings is only for tokens: **Test connection** checks one. Resources are imported
+from the client: **Clients → client → Add resources**. Pick a provider account; Jarvis
+lists everything it can see (marking what's already imported, including for other
+clients) and imports straight into that client. Import each environment as its own
+resource (e.g. the prod and dev DO apps separately; a Vercel project twice, production
+and preview branches). The environment is suggested from the name/branch and always
+confirmed by you. A client's own account can be connected from the same page, and
+resources can also be added by hand, edited or deleted there.
+Repositories are added per client (paste a GitHub URL); the GitHub picker arrives in
+step 11.
+
+## Tasks
+
+**Tasks** has a quick-add bar (title, client or Internal, due date) and views for
+Overdue / Today / Upcoming / Completed, filterable by client. "Today" is the London
+calendar day; due dates are stored as 12:00 UTC on that day. Open a task to edit its
+description and discuss it in comments. Each client page shows its next open tasks with
+its own quick-add.
+
+Coming next (5b): a private link per client contact (`/p/…`, no sign-up) so clients can
+comment and raise requests; internal tasks are never shown there.
 
 ## Auth model
 
@@ -163,9 +201,12 @@ The API also honours `PORT` (set by hosting platforms), `HOST` and `LOG_LEVEL`.
 ## Security notes
 
 - Jarvis tables are in the `jarvis` Postgres schema, not `public`.
-- Provider credentials will be AES-256-GCM encrypted with `ENCRYPTION_KEY` and
-  decrypted only in `apps/api`. Secrets are never sent to the browser or logged
-  (the API redacts `Authorization` and `Cookie` headers).
+- Stored provider credentials are AES-256-GCM encrypted with `ENCRYPTION_KEY` and
+  decrypted only in `apps/api`. `apps/web` never selects the ciphertext; the API
+  returns masked values only. Secrets are never logged (the API redacts
+  `Authorization` and `Cookie` headers, and provider errors are reduced to a status
+  and the provider's message). Changing `ENCRYPTION_KEY` makes stored tokens
+  unreadable; re-enter them if you rotate it.
 
 ## Deploying
 

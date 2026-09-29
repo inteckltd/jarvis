@@ -1,6 +1,16 @@
 import { prisma } from "@jarvis/db";
-import { londonDateOnlyBounds } from "@jarvis/shared";
-import { ChevronRight, ExternalLink, GitBranch, Mail, Pencil, Server } from "lucide-react";
+import { dateOnlyKey, londonDateOnlyBounds } from "@jarvis/shared";
+import {
+  ChevronRight,
+  ExternalLink,
+  GitBranch,
+  ListChecks,
+  Mail,
+  Pencil,
+  Plus,
+  Radar,
+  Server,
+} from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -11,8 +21,13 @@ import { EmptyState } from "@/components/hud/empty-state";
 import { HudPanel } from "@/components/hud/hud-panel";
 import { SectionLabel } from "@/components/hud/section-label";
 import { Stat } from "@/components/hud/stat";
+import { QuickAddTask } from "@/components/tasks/quick-add-task";
+import { TaskList } from "@/components/tasks/task-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { loadTaskClients, TASK_LIST_SELECT } from "@/lib/tasks";
+
+const TASK_PREVIEW_LIMIT = 6;
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -51,18 +66,26 @@ async function loadClient(slug: string) {
   });
   if (!client) return null;
 
-  const [openTasks, overdueTasks] = await Promise.all([
+  const [openTasks, overdueTasks, upNext, clients] = await Promise.all([
     prisma.task.count({ where: { clientId: client.id, completed: false } }),
     prisma.task.count({ where: { clientId: client.id, completed: false, dueDate: { lt: start } } }),
+    prisma.task.findMany({
+      where: { clientId: client.id, completed: false },
+      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
+      take: TASK_PREVIEW_LIMIT,
+      select: TASK_LIST_SELECT,
+    }),
+    loadTaskClients(),
   ]);
-  return { client, openTasks, overdueTasks };
+  return { client, openTasks, overdueTasks, upNext, clients };
 }
 
 export default async function ClientDetailPage({ params }: Params) {
   const { slug } = await params;
   const loaded = await loadClient(slug);
   if (!loaded) notFound();
-  const { client, openTasks, overdueTasks } = loaded;
+  const { client, openTasks, overdueTasks, upNext, clients } = loaded;
+  const now = new Date();
 
   const production = client.resources.filter((r) => r.environment === "PRODUCTION");
   const development = client.resources.filter((r) => r.environment === "DEVELOPMENT");
@@ -140,14 +163,37 @@ export default async function ClientDetailPage({ params }: Params) {
         </div>
       </HudPanel>
 
-      <HudPanel label="Production" title="Production resources">
+      <HudPanel
+        label="Production"
+        title="Production resources"
+        actions={
+          <Button asChild size="sm">
+            <Link href={`/clients/${client.slug}/resources/import`}>
+              <Radar />
+              Add resources
+            </Link>
+          </Button>
+        }
+      >
         {production.length ? (
-          <ResourceList resources={production} />
+          <ResourceList resources={production} clientSlug={client.slug} />
         ) : (
           <EmptyState
             icon={<Server />}
             title="No production resources"
-            description="Import resources from a provider account (step 4)."
+            description={
+              client.resources.length
+                ? "Only development or other resources so far."
+                : "Pick DigitalOcean, Supabase, Vercel or Expo and import this client's apps, databases and projects."
+            }
+            action={
+              <Button asChild size="sm">
+                <Link href={`/clients/${client.slug}/resources/import`}>
+                  <Plus />
+                  Add resources
+                </Link>
+              </Button>
+            }
             className="py-8"
           />
         )}
@@ -161,18 +207,72 @@ export default async function ClientDetailPage({ params }: Params) {
             <span className="font-mono text-xs">{development.length} resources</span>
           </summary>
           <div className="border-t border-border/60 px-5 py-4">
-            <ResourceList resources={development} muted />
+            <ResourceList resources={development} clientSlug={client.slug} muted />
           </div>
         </details>
       )}
 
       {other.length > 0 && (
         <HudPanel label="Mobile & other" title="Other resources" corners={false}>
-          <ResourceList resources={other} />
+          <ResourceList resources={other} clientSlug={client.slug} />
         </HudPanel>
       )}
 
-      <HudPanel label="GitHub" title="Repositories" corners={false}>
+      <HudPanel
+        label="Tasks"
+        title={
+          <span className="flex items-center gap-2">
+            Open tasks
+            <span className="font-mono text-sm text-muted-foreground">{openTasks}</span>
+          </span>
+        }
+        corners={false}
+        actions={
+          <Button asChild variant="ghost" size="sm">
+            <Link href={`/tasks?client=${client.slug}`}>
+              <ListChecks />
+              All tasks
+            </Link>
+          </Button>
+        }
+      >
+        <QuickAddTask
+          clients={clients}
+          today={dateOnlyKey(now)}
+          defaultClientId={client.id}
+          fixedClient
+          className="mb-4"
+        />
+        {upNext.length ? (
+          <>
+            <TaskList tasks={upNext} now={now} showClient={false} />
+            {openTasks > upNext.length && (
+              <Link
+                href={`/tasks?client=${client.slug}`}
+                className="mt-3 inline-block text-xs text-primary hover:underline"
+              >
+                {openTasks - upNext.length} more open
+              </Link>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">No open tasks for {client.name}.</p>
+        )}
+      </HudPanel>
+
+      <HudPanel
+        label="GitHub"
+        title="Repositories"
+        corners={false}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/clients/${client.slug}/repositories/new`}>
+              <Plus />
+              Add repository
+            </Link>
+          </Button>
+        }
+      >
         {client.repositories.length ? (
           <ul className="divide-y divide-border/60">
             {client.repositories.map((repo) => (
@@ -203,6 +303,14 @@ export default async function ClientDetailPage({ params }: Params) {
                     </Badge>
                   )}
                   {!repo.active && <Badge variant="nodata">Inactive</Badge>}
+                  <Button asChild variant="ghost" size="icon" className="size-7">
+                    <Link
+                      href={`/clients/${client.slug}/repositories/${repo.id}`}
+                      aria-label={`Edit ${repo.owner}/${repo.name}`}
+                    >
+                      <Pencil />
+                    </Link>
+                  </Button>
                 </div>
               </li>
             ))}
@@ -211,7 +319,7 @@ export default async function ClientDetailPage({ params }: Params) {
           <EmptyState
             icon={<GitBranch />}
             title="No repositories linked"
-            description="Link GitHub repositories when resources are set up (step 4)."
+            description="Link repositories to track releases and connect them to resources."
             className="py-8"
           />
         )}

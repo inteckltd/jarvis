@@ -1,5 +1,6 @@
 import type { Provider, ResourceType } from "@jarvis/db";
-import { ExternalLink, GitBranch, TriangleAlert } from "lucide-react";
+import { ExternalLink, GitBranch, Pencil, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PROVIDER_LABEL, RESOURCE_TYPE_LABEL } from "@/lib/labels";
@@ -28,9 +29,11 @@ function urlPart(url: string, part: "host" | "pathname"): string {
 
 export function ResourceList({
   resources,
+  clientSlug,
   muted = false,
 }: {
   resources: readonly ResourceListItem[];
+  clientSlug: string;
   muted?: boolean;
 }) {
   return (
@@ -47,7 +50,16 @@ export function ResourceList({
         >
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={cn("font-medium", muted && "text-muted-foreground")}>{r.name}</span>
+              <Link
+                href={`/clients/${clientSlug}/resources/${r.id}`}
+                className={cn(
+                  "group/name inline-flex items-center gap-1.5 font-medium hover:text-primary",
+                  muted && "text-muted-foreground",
+                )}
+              >
+                {r.name}
+                <Pencil className="size-3 opacity-0 transition-opacity group-hover/name:opacity-100" />
+              </Link>
               <Badge variant="outline">{RESOURCE_TYPE_LABEL[r.type]}</Badge>
               {!r.active && <Badge variant="nodata">Inactive</Badge>}
               {r.lastError && (

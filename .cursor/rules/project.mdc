@@ -114,9 +114,13 @@ Environments: PRODUCTION and DEVELOPMENT (development = "staging").
   errors
 - Repository: id, clientId, owner, name, productionBranch (default
   "main"), developmentBranch? (e.g. "pre-production"), active
-- Task: id, clientId (nullable = internal), title, dueDate, completed,
-  completedAt?, createdAt
+- Task: id, clientId (nullable = internal), title, description?,
+  dueDate, completed, completedAt?, createdAt, updatedAt
   (keep simple: no priorities, statuses, assignees or subtasks)
+- TaskComment: id, taskId, authorType (INTECK | CONTACT), authorName
+  (snapshot), contactId? (5b), body, createdAt
+- ClientContact (5b): id, clientId, name, email, portalToken (random,
+  unguessable, revocable), active, lastSeenAt?, createdAt
 - Report: id, clientId, month (YYYY-MM), data (JSON snapshot),
   summary (text), hiddenSections (string[]), status (DRAFT |
   PUBLISHED), publicToken (random, unguessable), pdfUrl?, createdAt,
@@ -224,8 +228,15 @@ and show a warning badge.
 4. Provider accounts + resources UI: add account, test connection,
    discover and import resources, set environment, link repository,
    set health check URL
-5. Tasks: quick-add (title, client, due date), complete, views for
-   Overdue / Today / Upcoming, filter by client
+5. Tasks (replaces Monday.com for client collaboration):
+   a. Quick-add (title, client, due date), description, comments,
+      complete, views for Overdue / Today / Upcoming, filter by client
+   b. Client portal: per-contact private links (/p/[portalToken], no
+      accounts or sign-up). A contact sees only their client's
+      client-visible tasks, can comment and create requests (land in an
+      Inbox for triage). Internal tasks are never shown. Links can be
+      revoked/regenerated per contact. Email notifications come later
+      (provider to be chosen; ask before adding the dependency).
 6. Morning dashboard: greeting; client card with production RAG status,
    gauges per production resource, uptime, restarts, latest deploys;
    muted development section; today + overdue tasks; GitHub activity;

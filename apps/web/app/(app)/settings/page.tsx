@@ -1,10 +1,14 @@
+import { prisma } from "@jarvis/db";
 import { DEFAULT_THRESHOLDS, RESTART_THRESHOLDS, TIMEZONE } from "@jarvis/shared";
+import { ChevronRight } from "lucide-react";
 import type { Metadata } from "next";
+import Link from "next/link";
 import type * as React from "react";
 import { z } from "zod";
 import { HudPanel } from "@/components/hud/hud-panel";
 import { StatusDot } from "@/components/hud/status-dot";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { serverEnv } from "@/lib/env";
@@ -23,7 +27,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 export default async function SettingsPage() {
-  const [user, api] = await Promise.all([requireUser(), apiFetch("/v1/me", meSchema)]);
+  const [user, api, accountCount] = await Promise.all([
+    requireUser(),
+    apiFetch("/v1/me", meSchema),
+    prisma.providerAccount.count(),
+  ]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -65,6 +73,26 @@ export default async function SettingsPage() {
         </dl>
       </HudPanel>
 
+      <HudPanel
+        label="Integrations"
+        title="Provider accounts"
+        className="lg:col-span-2"
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/settings/accounts">
+              Manage
+              <ChevronRight />
+            </Link>
+          </Button>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          {accountCount === 0
+            ? "No accounts yet. Add Inteck's DigitalOcean, Supabase, Vercel and Expo tokens once; clients import from them."
+            : `${accountCount} account${accountCount === 1 ? "" : "s"} connected. Check and rotate tokens here; import resources from each client's page.`}
+        </p>
+      </HudPanel>
+
       <HudPanel label="Defaults" title="Alert thresholds" className="lg:col-span-2" corners={false}>
         <dl className="divide-y divide-border/70">
           <Row label="CPU / memory / disk warning">
@@ -81,9 +109,6 @@ export default async function SettingsPage() {
             </span>
           </Row>
         </dl>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Provider accounts and per-client settings arrive in step 4.
-        </p>
       </HudPanel>
     </div>
   );

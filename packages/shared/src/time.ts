@@ -45,6 +45,21 @@ export function formatLondonTime(date: Date): string {
   return londonTime.format(date);
 }
 
+const londonShort = new Intl.DateTimeFormat("en-GB", {
+  timeZone: TIMEZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/** "29 Sep 2026, 10:32" in Europe/London. */
+export function formatLondonDateTime(date: Date): string {
+  return londonShort.format(date);
+}
+
 /** Hour of day 0–23 in Europe/London. */
 export function londonHour(date: Date): number {
   return Number(londonHourFmt.format(date)) % 24;
