@@ -1,3 +1,289 @@
 ---
 alwaysApply: true
 ---
+# Project: Jarvis — Internal Operations Dashboard for Inteck
+
+## Overview
+Jarvis is a single-user internal dashboard for the owner of Inteck, a
+software development company. Each morning it shows each client's
+infrastructure health, deployments, today's tasks, and GitHub activity.
+It also generates branded monthly client reports (web link + PDF).
+Internal views show full technical detail; client reports show a
+curated, client-friendly subset.
+
+## Current Focus: Pilot Client "IDS" (Industrial Door Systems)
+- Build and test end-to-end for ONE client: IDS.
+- Architecture must support many clients, providers, environments and
+  GitHub orgs from day one. Do NOT hardcode IDS in application logic;
+  IDS exists only as data (seed script / UI).
+- The dashboard must look good with a single client.
+
+### IDS setup (all accounts owned by Inteck)
+Environments: PRODUCTION and DEVELOPMENT (development = "staging").
+
+| Resource            | Provider         | Prod | Dev | Repo                          |
+|---------------------|------------------|------|-----|-------------------------------|
+| workforce-api       | DO App Platform  | yes  | yes | ids.workforce-api             |
+| html-pdf-api        | DO App Platform  | yes  | yes | ids.simplx-html-pdf-converter |
+| Database            | Supabase         | yes  | yes | —                             |
+| Edge functions      | Supabase         | yes  | yes | ids.simplx-serverless         |
+| Web UI              | Vercel           | yes  | yes | ids-simplx.ui                 |
+| Mobile app (Expo)   | Expo / EAS       | —    | —   | ids-simplx.mobile             |
+
+- DigitalOcean: all 4 APIs run on App Platform. Production and
+  development are SEPARATE apps (4 apps total), each imported as its
+  own Resource with its own environment. Build DO_APP first; keep
+  DO_DROPLET in the design for future clients.
+- GitHub org: industrial-door-systems
+- Branch mapping: main -> PRODUCTION, pre-production -> DEVELOPMENT
+  (configurable per repository). Mobile releases are manual and not
+  branch-based.
+- APIs may not have /health endpoints yet; fall back to base URL checks.
+
+## Tech Stack
+- Monorepo: pnpm workspaces + Turborepo
+  - apps/web: Next.js 15 (App Router, TypeScript, Server Components)
+  - apps/api: Node.js + Fastify (TypeScript) — integrations, scheduled
+    jobs, metric collection, report aggregation, PDF generation,
+    credential encryption
+  - packages/db: Prisma schema + client (Jarvis's own Supabase Postgres
+    project, separate from client databases)
+  - packages/shared: shared types, zod schemas, utils
+- Auth: Supabase Auth, single user; only ALLOWED_EMAIL may sign in.
+  Next.js middleware protects all routes except public report links.
+  apps/api verifies the Supabase JWT on every request.
+- Jobs: pg-boss (Postgres-backed, no Redis) inside apps/api
+- UI: Tailwind CSS + shadcn/ui, Recharts
+- PDF: Puppeteer in apps/api renders the web report page
+- AI: Vercel AI SDK, provider-agnostic, small/cheap model by default,
+  behind AI_ENABLED (default false)
+
+## Design: "Jarvis" Look and Feel
+- Dark only: near-black background, cyan/electric-blue accents, soft glow
+- HUD style: thin glowing borders, subtle grid background, monospace for
+  numbers, circular gauges (CPU/memory/disk), sparklines for trends
+- Status colours: green healthy, amber warning, red critical, grey
+  no data / connection error. "N/A" (e.g. disk on App Platform) is
+  neutral, never an error.
+- Header: "Good morning. Here's your briefing." + date/time (Europe/London)
+- Subtle animation only. Desktop first, usable on mobile.
+- Default thresholds: warning >= 75%, critical >= 90% (configurable)
+- Restarts: any restart in the last 24h on a PRODUCTION component =
+  amber; 3+ in 24h = red.
+- Failed latest production deployment = red; health check down = red.
+- PRODUCTION drives the client's RAG status. DEVELOPMENT is shown
+  separately, visually quieter (collapsed section / muted styling), and
+  never turns a client red on its own.
+
+## Data Models
+- Client: id, name, slug, logoUrl, contactName, contactEmail, notes,
+  active, createdAt
+- ProviderAccount: id, clientId (nullable = Inteck-owned), label,
+  provider (DIGITALOCEAN | AWS | SUPABASE | VERCEL | EXPO),
+  authType (ENV_TOKEN | ENCRYPTED_TOKEN | AWS_ASSUME_ROLE |
+  AWS_ACCESS_KEY), encryptedCredentials?, envVarName?, awsRoleArn?,
+  awsExternalId?, lastVerifiedAt?, lastError?
+  (Inteck-owned accounts use ENV_TOKEN referencing an env var;
+  client-owned accounts later use encrypted credentials.)
+- Resource: id, clientId, providerAccountId, name,
+  environment (PRODUCTION | DEVELOPMENT | NONE),
+  type (DO_APP | DO_DROPLET | SUPABASE_PROJECT | SUPABASE_FUNCTIONS |
+  VERCEL_PROJECT | EXPO_APP | AWS_EC2),
+  externalId (DO app ID / droplet ID / Supabase project ref /
+  Vercel project ID / Expo project ID), region?, liveUrl?,
+  healthCheckUrl?, repositoryId?,
+  config (JSON, e.g. DO componentName, bundleId, iosAppId,
+  androidPackage), encryptedSecrets? (e.g. Supabase service role key),
+  lastError?, active
+- MetricSnapshot: id, resourceId, cpuPercent?, memoryPercent?,
+  diskPercent?, restartCount?, dbConnections?, dbSizeBytes?,
+  capturedAt (index resourceId + capturedAt)
+- MetricRollupHourly: id, resourceId, hour, avg/max for cpu, memory,
+  disk, sum restarts, max dbSizeBytes (used by reports)
+- HealthCheck: id, resourceId, isUp, statusCode?, responseMs?,
+  checkedAt
+- Deployment: id, resourceId, externalId, status (BUILDING | SUCCESS |
+  FAILED | CANCELED), cause?, commitSha?, commitMessage?, branch?,
+  url?, startedAt, finishedAt?  (unique on resourceId + externalId)
+- MobileBuild: id, resourceId, externalId, platform (IOS | ANDROID),
+  profile, status, appVersion, buildNumber, commitSha?,
+  submittedToStore (bool), createdAt, completedAt?
+- StoreVersion: id, resourceId, platform, version, releasedAt?,
+  checkedAt
+- FunctionStats: id, resourceId, periodStart, periodEnd, invocations,
+  errors
+- Repository: id, clientId, owner, name, productionBranch (default
+  "main"), developmentBranch? (e.g. "pre-production"), active
+- Task: id, clientId (nullable = internal), title, dueDate, completed,
+  completedAt?, createdAt
+  (keep simple: no priorities, statuses, assignees or subtasks)
+- Report: id, clientId, month (YYYY-MM), data (JSON snapshot),
+  summary (text), hiddenSections (string[]), status (DRAFT |
+  PUBLISHED), publicToken (random, unguessable), pdfUrl?, createdAt,
+  publishedAt?
+
+## Integrations (apps/api, adapter pattern)
+Interfaces per capability, e.g.:
+  interface MetricsProvider { testConnection(); getMetrics(resource, from, to) }
+  interface DeploymentProvider { listDeployments(resource, since) }
+  interface DiscoveryProvider { listResources(account) }
+One failing provider/resource must never block others; record lastError
+and show a warning badge.
+
+### DigitalOcean (DO_API_TOKEN, read scope)
+- DO_APP (build first):
+  - Discovery: GET /v2/apps — list all apps so the user can import each
+    one as a Resource, assign PRODUCTION / DEVELOPMENT, and link a
+    repository. Each environment is a separate app. Suggest the
+    environment from the app name (e.g. "-dev", "-staging",
+    "-preprod") and the deployed branch, but let the user confirm.
+  - Store the primary service component name in Resource.config
+    (an app may contain several components; default to the first
+    service).
+  - Metrics per app component via the Monitoring API:
+    /v2/monitoring/metrics/apps/cpu_percentage,
+    /v2/monitoring/metrics/apps/memory_percentage,
+    /v2/monitoring/metrics/apps/restart_count
+    (params: app_id, app_component, start, end).
+  - Deployments: GET /v2/apps/{id}/deployments — phase, cause, commit
+    sha, branch, created/updated times. Map phases to
+    BUILDING | SUCCESS | FAILED | CANCELED.
+  - liveUrl from the app's live_url; default healthCheckUrl to
+    {live_url}/health, falling back to live_url.
+  - Disk: not applicable, so store null and show "N/A".
+- DO_DROPLET (later): Monitoring API for CPU, memory, disk (needs agent).
+
+### Supabase (SUPABASE_ACCESS_TOKEN — Management API)
+- Discovery: list projects so the user can import the IDS prod and dev
+  projects and assign environments.
+- Project info: plan, region, status, database size.
+- DB metrics (CPU, memory, disk, connections): per-project privileged
+  metrics endpoint (Prometheus format) authenticated with that
+  project's service role key (stored in Resource.encryptedSecrets).
+  Parse only the metrics we need.
+- Edge functions: list functions with versions and updated dates;
+  invocation and error counts via Management API analytics where
+  available. If unavailable, degrade gracefully (show N/A).
+
+### Vercel (VERCEL_TOKEN, optional VERCEL_TEAM_ID)
+- Discovery: list projects to import.
+- Deployments per project: state, target (production / preview),
+  commit sha/message, branch, url, created/ready times. Map the
+  pre-production branch deployments to DEVELOPMENT.
+
+### Expo / EAS (EXPO_TOKEN)
+- Expo GraphQL API: EAS builds (platform, profile, status, version,
+  build number, commit) and submissions.
+- iOS App Store live version: public iTunes lookup API by bundleId.
+- Google Play live version: phase 2 (Google Play Developer API with
+  service account). Until then, show latest submitted Android build.
+
+### Health checks
+- Every 1 minute for each resource with a healthCheckUrl (default
+  /health, fall back to base URL). Record status and response time.
+  Uptime % calculated from HealthCheck rows.
+
+### GitHub (GITHUB_TOKEN, classic PAT: repo, read:org)
+- Octokit, multiple orgs; searchable repo picker across all orgs.
+- Dashboard: commits and PRs from the last 24–48h per client.
+- Release tracking using branch mapping:
+  - "Released to production": PRs merged into productionBranch.
+  - "On staging, awaiting production": commits/PRs in
+    developmentBranch not yet in productionBranch (compare API:
+    productionBranch...developmentBranch).
+- Handle pagination and rate limits; cache briefly.
+
+### AWS (build later, keep in design)
+- STS AssumeRole with External ID, or encrypted keys; CloudWatch
+  CPUUtilization plus CWAgent mem_used_percent/disk_used_percent.
+
+### Scheduling (pg-boss)
+- Metrics: every 5 min. Health checks: every 1 min.
+  Deployments/builds: every 5 min. Store versions: every 6 hours.
+  GitHub: on demand with caching + hourly sync.
+- Hourly rollup job builds MetricRollupHourly.
+- Retention: raw metrics and health checks older than 90 days purged
+  daily; hourly rollups kept 13 months for reports.
+
+### Credentials
+- Inteck-owned tokens come from env vars. Any stored secrets are
+  AES-256-GCM encrypted with ENCRYPTION_KEY and decrypted ONLY in
+  apps/api. Never send secrets to apps/web or the browser; UI shows
+  masked values only. Never log secrets.
+
+## Features (build in order, one step at a time, stop after each)
+1. Scaffold monorepo, Prisma schema, Supabase connection, auth,
+   Jarvis theme, app shell (Dashboard, Clients, Tasks, Reports,
+   Settings)
+2. Seed script: IDS with the exact resources/repos above (4 separate
+   DO apps, 2 Supabase projects, 2 edge function resources, 2 Vercel
+   environments, 1 Expo app) and realistic mock metrics, restarts,
+   health checks, deployments, builds and tasks (30 days), so the UI
+   works without live integrations
+3. Clients: list, create, edit, detail page
+4. Provider accounts + resources UI: add account, test connection,
+   discover and import resources, set environment, link repository,
+   set health check URL
+5. Tasks: quick-add (title, client, due date), complete, views for
+   Overdue / Today / Upcoming, filter by client
+6. Morning dashboard: greeting; client card with production RAG status,
+   gauges per production resource, uptime, restarts, latest deploys;
+   muted development section; today + overdue tasks; GitHub activity;
+   "awaiting production" count; warnings
+7. Client detail: tabs for Production / Development / Mobile /
+   Activity. Charts (24h/7d/30d), deploy timeline, builds, repos
+8. Live DigitalOcean App Platform integration
+9. Live Supabase integration
+10. Live Vercel integration
+11. Live GitHub integration + release tracking
+12. Live Expo/EAS integration + iOS store version
+13. Health checks + uptime
+14. Monthly reports:
+    - Pick client + month -> aggregate into a data snapshot
+    - Client-facing sections: service availability (uptime per
+      production service), performance (avg/peak CPU and memory,
+      summarised), database growth, edge function usage,
+      "Released to production" (PRs/features), "On staging, awaiting
+      production", deployments per environment, mobile releases
+      (versions, builds, store versions), tasks completed, summary
+    - Exclude internal-only data (errors, restarts, plans, connection
+      issues, raw DB metrics)
+    - Match the layout in docs/report-template/
+    - DRAFT -> edit summary and hide/show sections -> PUBLISH
+      (snapshot frozen)
+    - Public read-only view at /r/[publicToken]; PDF via Puppeteer
+15. AI (AI_ENABLED): morning briefing and draft report summary written
+    in plain English (editable before publish)
+16. Phase 2: email alerts, Google Play version, renewals calendar,
+    time tracking, AWS integration, more clients
+
+## Documentation to Create
+- README.md: setup, env vars, running locally, deploying
+- .env.example: DATABASE_URL, DIRECT_URL, NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
+  ALLOWED_EMAIL, API_URL, ENCRYPTION_KEY, DO_API_TOKEN,
+  SUPABASE_ACCESS_TOKEN, VERCEL_TOKEN, VERCEL_TEAM_ID, EXPO_TOKEN,
+  GITHUB_TOKEN, AI_ENABLED, AI_API_KEY
+- docs/setup-digitalocean.md, docs/setup-supabase.md,
+  docs/setup-vercel.md, docs/setup-expo.md, docs/setup-github.md:
+  how to create each token and required scopes
+- docs/health-endpoints.md: snippet for adding /health to Node APIs
+
+## Coding Standards
+- Strict TypeScript, no `any`; zod validation for all inputs and all
+  external API responses
+- Server Components by default; client components only when needed
+- Server Actions for simple CRUD in apps/web; apps/api for
+  integrations, jobs, credentials and PDF
+- Small focused modules; adapters per provider
+- Vitest tests: RAG status logic (incl. restarts), metric aggregation,
+  uptime calc, release tracking (branch compare), report aggregation,
+  encryption
+- Store dates in UTC, display in Europe/London
+- Ask before adding dependencies outside this stack
+- After each step: summarise what was built, what to test manually,
+  and any env vars/setup needed
+
+## First Task
+Complete steps 1 and 2 only. Do not build integrations yet.
+Stop and summarise when done.
